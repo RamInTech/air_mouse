@@ -5,13 +5,14 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.util.Log
 import com.google.firebase.database.FirebaseDatabase
 import java.util.UUID
 import kotlin.math.abs
 
 class SensorHandler(context: Context) : SensorEventListener {
 
-    // ---------- Unique Session ID ----------
+    // ---------- Session ----------
     private val sessionId: String = UUID.randomUUID().toString()
 
     // ---------- Sensors ----------
@@ -21,6 +22,7 @@ class SensorHandler(context: Context) : SensorEventListener {
     private val gyro =
         sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
 
+    // REVERTED: Changed back to standard accelerometer for scroll
     private val accel =
         sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
 
@@ -36,18 +38,29 @@ class SensorHandler(context: Context) : SensorEventListener {
 
     // ---------- Tuning ----------
     private val sensitivity = 8f
-    private val scrollSensitivity = 4f
-    private val deadZone = 0.02f
+    private val scrollSensitivity = 4f // Reverted to original value
+    private val deadZone = 0.02f // Reverted to original value
 
     // ---------- Click ----------
-    private val CLICK_THRESHOLD = 7.5f
     private val CLICK_COOLDOWN = 500L
-    private var lastClickTime = 0L
+    private var lastClickDetectionTime = 0L
+    private var lastClickActivationTime = 0L
+
+    // NEW: Public method to be called from MainActivity when the screen is tapped
+    fun triggerClick() {
+        val now = System.currentTimeMillis()
+        if (now - lastClickDetectionTime > CLICK_COOLDOWN) {
+            lastClickDetectionTime = now
+            lastClickActivationTime = now
+            Log.d("CLICK", "CLICK TRIGGERED from UI tap")
+        }
+    }
 
     fun start() {
-        println("🔥 Firebase Session ID: $sessionId")
+        Log.d("SensorHandler", "Session ID: $sessionId")
 
         sensorManager.registerListener(this, gyro, SensorManager.SENSOR_DELAY_GAME)
+        // REVERTED: Listening to the standard accelerometer again
         sensorManager.registerListener(this, accel, SensorManager.SENSOR_DELAY_GAME)
     }
 
@@ -57,39 +70,46 @@ class SensorHandler(context: Context) : SensorEventListener {
 
     override fun onSensorChanged(event: SensorEvent) {
 
-        var click = false
-
         when (event.sensor.type) {
 
+            // -------- Cursor movement --------
             Sensor.TYPE_GYROSCOPE -> {
                 dx = -event.values[1] * sensitivity
                 dy = event.values[0] * sensitivity
             }
 
+            // -------- Scroll (Reverted to original logic) --------
             Sensor.TYPE_ACCELEROMETER -> {
+                // Scroll is based on Z-axis tilt (forward/backward)
                 val z = event.values[2]
                 scroll = z * scrollSensitivity
 
-                if (abs(z) > CLICK_THRESHOLD) {
-                    val now = System.currentTimeMillis()
-                    if (now - lastClickTime > CLICK_COOLDOWN) {
-                        click = true
-                        lastClickTime = now
-                        println("🖱 CLICK DETECTED!")
-                    }
-                }
+                // REMOVED: Physical click detection logic is no longer here.
             }
         }
 
+        // Dead zone
         if (abs(dx) < deadZone) dx = 0f
         if (abs(dy) < deadZone) dy = 0f
         if (abs(scroll) < deadZone) scroll = 0f
 
-        sendToFirebase(click)
+        // -------- Click state logic (This part remains to manage the 1-second signal) --------
+        val now = System.currentTimeMillis()
+        var clickIsActive = false
+
+        if (lastClickActivationTime != 0L) {
+            if ((now - lastClickActivationTime) < 750L) {
+                clickIsActive = true
+            } else {
+                // Reset after 1 second has passed
+                lastClickActivationTime = 0L
+            }
+        }
+
+        sendToFirebase(clickIsActive)
     }
 
     private fun sendToFirebase(click: Boolean) {
-
         val data = mapOf(
             "dx" to dx,
             "dy" to dy,
@@ -97,7 +117,6 @@ class SensorHandler(context: Context) : SensorEventListener {
             "click" to click,
             "timestamp" to System.currentTimeMillis()
         )
-
         dbRef.setValue(data)
     }
 
