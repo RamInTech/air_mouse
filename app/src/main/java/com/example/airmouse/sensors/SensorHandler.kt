@@ -22,14 +22,15 @@ class SensorHandler(context: Context) : SensorEventListener {
     private val gyro =
         sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
 
-    // REVERTED: Changed back to standard accelerometer for scroll
     private val accel =
         sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
 
     // ---------- Firebase ----------
     private val dbRef =
         FirebaseDatabase.getInstance()
-            .getReference("sessions/$sessionId/motion")
+            .getReference("sessions/$sessionId")
+
+    private val motionDbRef = dbRef.child("motion")
 
     // ---------- Motion ----------
     private var dx = 0f
@@ -38,15 +39,14 @@ class SensorHandler(context: Context) : SensorEventListener {
 
     // ---------- Tuning ----------
     private val sensitivity = 8f
-    private val scrollSensitivity = 4f // Reverted to original value
-    private val deadZone = 0.02f // Reverted to original value
+    private val scrollSensitivity = 4f
+    private val deadZone = 0.02f
 
     // ---------- Click ----------
     private val CLICK_COOLDOWN = 500L
     private var lastClickDetectionTime = 0L
     private var lastClickActivationTime = 0L
 
-    // NEW: Public method to be called from MainActivity when the screen is tapped
     fun triggerClick() {
         val now = System.currentTimeMillis()
         if (now - lastClickDetectionTime > CLICK_COOLDOWN) {
@@ -59,41 +59,39 @@ class SensorHandler(context: Context) : SensorEventListener {
     fun start() {
         Log.d("SensorHandler", "Session ID: $sessionId")
 
+        // Sets the session to active
+        dbRef.child("active").setValue(true)
+
         sensorManager.registerListener(this, gyro, SensorManager.SENSOR_DELAY_GAME)
-        // REVERTED: Listening to the standard accelerometer again
         sensorManager.registerListener(this, accel, SensorManager.SENSOR_DELAY_GAME)
     }
 
     fun stop() {
         sensorManager.unregisterListener(this)
+
+        // Sets the session to inactive
+        dbRef.child("active").setValue(false)
     }
 
     override fun onSensorChanged(event: SensorEvent) {
 
         when (event.sensor.type) {
 
-            // -------- Cursor movement --------
             Sensor.TYPE_GYROSCOPE -> {
                 dx = -event.values[1] * sensitivity
                 dy = event.values[0] * sensitivity
             }
 
-            // -------- Scroll (Reverted to original logic) --------
             Sensor.TYPE_ACCELEROMETER -> {
-                // Scroll is based on Z-axis tilt (forward/backward)
                 val z = event.values[2]
                 scroll = z * scrollSensitivity
-
-                // REMOVED: Physical click detection logic is no longer here.
             }
         }
 
-        // Dead zone
         if (abs(dx) < deadZone) dx = 0f
         if (abs(dy) < deadZone) dy = 0f
         if (abs(scroll) < deadZone) scroll = 0f
 
-        // -------- Click state logic (This part remains to manage the 1-second signal) --------
         val now = System.currentTimeMillis()
         var clickIsActive = false
 
@@ -101,7 +99,6 @@ class SensorHandler(context: Context) : SensorEventListener {
             if ((now - lastClickActivationTime) < 750L) {
                 clickIsActive = true
             } else {
-                // Reset after 1 second has passed
                 lastClickActivationTime = 0L
             }
         }
@@ -117,7 +114,7 @@ class SensorHandler(context: Context) : SensorEventListener {
             "click" to click,
             "timestamp" to System.currentTimeMillis()
         )
-        dbRef.setValue(data)
+        motionDbRef.setValue(data)
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
